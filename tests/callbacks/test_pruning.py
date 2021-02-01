@@ -24,10 +24,10 @@ from pytorch_lightning.utilities import _PYTORCH_PRUNE_AVAILABLE
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from tests.helpers import BoringModel
 
+from pytorch_lightning.callbacks import ModelPruning
+
 if _PYTORCH_PRUNE_AVAILABLE:
     import torch.nn.utils.prune as pytorch_prune
-
-    from pytorch_lightning.callbacks import ModelPruning
 
 
 class PruningModel(BoringModel):
