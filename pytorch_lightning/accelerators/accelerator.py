@@ -20,12 +20,10 @@ from torch.utils.data import DataLoader
 from pytorch_lightning.core import LightningModule
 from pytorch_lightning.plugins.precision import (
     ApexMixedPrecisionPlugin,
-    MixedPrecisionPlugin,
     NativeMixedPrecisionPlugin,
     PrecisionPlugin,
 )
 from pytorch_lightning.plugins.training_type import TrainingTypePlugin
-from pytorch_lightning.plugins.training_type.horovod import HorovodPlugin
 from pytorch_lightning.utilities.apply_func import move_data_to_device
 from pytorch_lightning.utilities.distributed import all_gather_ddp_if_available
 from pytorch_lightning.utilities.enums import AMPType, LightningEnum
@@ -282,7 +280,7 @@ class Accelerator(object):
         self.training_type_plugin.post_optimizer_step(optimizer, opt_idx, **kwargs)
 
     def run_optimizer_step(self, optimizer: Optimizer, optimizer_idx: int, lambda_closure: Callable, **kwargs):
-        optimizer.step(closure=lambda_closure, **kwargs)
+        self.training_type_plugin.optimizer_step(optimizer, lambda_closure=lambda_closure, **kwargs)
 
     def optimizer_zero_grad(self, current_epoch: int, batch_idx: int, optimizer: Optimizer, opt_idx: int) -> None:
         """Zeros all model parameter's gradients"""
@@ -315,7 +313,8 @@ class Accelerator(object):
         """
         if trainer.testing is True:
             return
-        optimizers, lr_schedulers, optimizer_frequencies = trainer.init_optimizers(model)
+
+        optimizers, lr_schedulers, optimizer_frequencies = self.training_type_plugin.init_optimizers(trainer, model)
         self.optimizers = optimizers
         self.lr_schedulers = lr_schedulers
         self.optimizer_frequencies = optimizer_frequencies
