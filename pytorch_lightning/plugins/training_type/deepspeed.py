@@ -17,23 +17,21 @@ import logging
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Optional, Union, Tuple, Callable
-from typing import List
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as torch_distrib
+
 from pytorch_lightning.core.lightning import LightningModule
-from pytorch_lightning.overrides.base import _LightningModuleWrapperBase
-
-from pytorch_lightning.plugins.training_type.parallel import ParallelPlugin
-from pytorch_lightning.utilities.apply_func import move_float_tensors_to_half
-from pytorch_lightning.utilities.seed import seed_everything
-
 from pytorch_lightning.distributed import LightningDistributed
+from pytorch_lightning.overrides.base import _LightningModuleWrapperBase
+from pytorch_lightning.plugins.training_type.parallel import ParallelPlugin
 from pytorch_lightning.utilities import AMPType
-from pytorch_lightning.utilities.distributed import sync_ddp_if_available, rank_zero_only
+from pytorch_lightning.utilities.apply_func import move_float_tensors_to_half
+from pytorch_lightning.utilities.distributed import rank_zero_only, sync_ddp_if_available
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.imports import _DEEPSPEED_AVAILABLE
+from pytorch_lightning.utilities.seed import seed_everything
 
 if _DEEPSPEED_AVAILABLE:
     import deepspeed
@@ -43,6 +41,7 @@ else:
 if torch.distributed.is_available():
     from torch.distributed import ReduceOp
 else:
+
     class ReduceOp:
         SUM = None
 
@@ -64,10 +63,10 @@ class DeepSpeedPlugin(ParallelPlugin):
     distributed_backend = "deepspeed"
 
     def __init__(
-            self,
-            parallel_devices: List[torch.device],
-            config: Union[Path, str, dict],
-            logging_level: int = logging.WARN
+        self,
+        parallel_devices: List[torch.device],
+        config: Union[Path, str, dict],
+        logging_level: int = logging.WARN
     ) -> None:
         super().__init__(parallel_devices)
         self.dist = LightningDistributed()
@@ -118,10 +117,7 @@ class DeepSpeedPlugin(ParallelPlugin):
         model_parameters = filter(lambda p: p.requires_grad, self.model.parameters())
         model, optimizer, _, lr_scheduler = deepspeed.initialize(
             args=SimpleNamespace(local_rank=self.local_rank),
-            model=LightningDeepSpeedModule(
-                pl_module=self.model,
-                precision=precision
-            ),
+            model=LightningDeepSpeedModule(pl_module=self.model, precision=precision),
             model_parameters=model_parameters,
             config_params=self.config,
         )
@@ -162,10 +158,7 @@ class DeepSpeedPlugin(ParallelPlugin):
 
     @property
     def distributed_sampler_kwargs(self):
-        distributed_sampler_kwargs = dict(
-            num_replicas=self.world_size,
-            rank=self.global_rank
-        )
+        distributed_sampler_kwargs = dict(num_replicas=self.world_size, rank=self.global_rank)
         return distributed_sampler_kwargs
 
     def init_optimizers(self, trainer: "Trainer", model: LightningModule) -> Tuple[List, List, List]:
@@ -180,7 +173,7 @@ class DeepSpeedPlugin(ParallelPlugin):
     def _format_config(self):
         if not self.config:
             raise MisconfigurationException(
-                "To use DeepSpeed you must pass in a deepspeed config object or path to an object."
+                "To use DeepSpeed you must pass in a DeepSpeed config dictionary, or path to a json config."
                 "todo: Doc Link."
             )
         self._format_optimizer_config()
@@ -199,9 +192,7 @@ class DeepSpeedPlugin(ParallelPlugin):
                 )
 
             if not len(self.optimizer) == 1 or len(self.scheduler) == 1:
-                raise MisconfigurationException(
-                    "DeepSpeed currently only supports single optimizer, single scheduler."
-                )
+                raise MisconfigurationException("DeepSpeed currently only supports single optimizer, single scheduler.")
 
             optimizer_name, optimizer_params = self.optimizer.items()[0]
             scheduler_name, scheduler_params = self.scheduler.items()[0]
@@ -238,9 +229,7 @@ class DeepSpeedPlugin(ParallelPlugin):
         precision = self.model.trainer.accelerator_connector.precision
         if precision == 16:
             if "amp" not in self.config and amp_type == AMPType.NATIVE:
-                self.config["fp16"] = {
-                    "enabled": True
-                }
+                self.config["fp16"] = {"enabled": True}
             elif "apex" not in self.config and amp_type == AMPType.APEX:
                 self.config["amp"] = {
                     "enabled": True,
