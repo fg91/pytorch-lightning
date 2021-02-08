@@ -17,18 +17,18 @@ import logging
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Tuple, Union
 
 import torch
 import torch.distributed as torch_distrib
 
 from pytorch_lightning.core.lightning import LightningModule
-from pytorch_lightning.distributed import LightningDistributed
 from pytorch_lightning.overrides.base import _LightningModuleWrapperBase
-from pytorch_lightning.plugins.training_type.parallel import ParallelPlugin
+from pytorch_lightning.plugins.environments.cluster_environment import ClusterEnvironment
+from pytorch_lightning.plugins.training_type.ddp import DDPPlugin
 from pytorch_lightning.utilities import AMPType
 from pytorch_lightning.utilities.apply_func import move_float_tensors_to_half
-from pytorch_lightning.utilities.distributed import rank_zero_only, sync_ddp_if_available
+from pytorch_lightning.utilities.distributed import rank_zero_only
 from pytorch_lightning.utilities.exceptions import MisconfigurationException
 from pytorch_lightning.utilities.imports import _DEEPSPEED_AVAILABLE
 from pytorch_lightning.utilities.seed import seed_everything
@@ -37,13 +37,6 @@ if _DEEPSPEED_AVAILABLE:
     import deepspeed
 else:
     deepspeed = None
-
-if torch.distributed.is_available():
-    from torch.distributed import ReduceOp
-else:
-
-    class ReduceOp:
-        SUM = None
 
 
 class LightningDeepSpeedModule(_LightningModuleWrapperBase):
@@ -59,17 +52,20 @@ class LightningDeepSpeedModule(_LightningModuleWrapperBase):
         return super().forward(*inputs, **kwargs)
 
 
-class DeepSpeedPlugin(ParallelPlugin):
+class DeepSpeedPlugin(DDPPlugin):
     distributed_backend = "deepspeed"
 
     def __init__(
         self,
-        parallel_devices: List[torch.device],
         config: Union[Path, str, dict],
-        logging_level: int = logging.WARN
+        logging_level: int = logging.WARN,
+        num_nodes=1,
+        parallel_devices: List[torch.device] = None,
+        cluster_environment: ClusterEnvironment = None,
     ) -> None:
-        super().__init__(parallel_devices)
-        self.dist = LightningDistributed()
+        super().__init__(
+            parallel_devices=parallel_devices, num_nodes=num_nodes, cluster_environment=cluster_environment
+        )
         if isinstance(config, str) or isinstance(config, Path):
             with open(config) as f:
                 self.config = json.load(f)
@@ -78,14 +74,10 @@ class DeepSpeedPlugin(ParallelPlugin):
         self._config_initialized = False
         deepspeed.utils.logging.logger.setLevel(logging_level)
 
-    def setup(self, model):
-        self.model = model
-
     def pre_training(self):
-
-        self.init_connection()
-        # determine which process we are and world size
         self.set_world_ranks()
+        self.init_ddp_connection(self.global_rank, self.world_size)
+
         self.init_deepspeed()
 
         # TODO: check if needed
@@ -103,10 +95,6 @@ class DeepSpeedPlugin(ParallelPlugin):
         # move the model to the correct device
         self.model_to_device()
         self.barrier()
-
-    def init_connection(self):
-        torch_backend = "nccl" if self.on_gpu else "gloo"
-        deepspeed.init_distributed(torch_backend)
 
     def init_deepspeed(self):
         if not self._config_initialized:
@@ -140,15 +128,6 @@ class DeepSpeedPlugin(ParallelPlugin):
             'strict': True,  # enforce that the monitor exists for ReduceLROnPlateau
         }
         return [scheduler]
-
-    def set_world_ranks(self):
-        self.global_rank = int(os.environ['RANK'])
-        self.world_size = int(os.environ['WORLD_SIZE'])
-        self.local_rank = int(os.environ['LOCAL_RANK'])
-
-    @property
-    def root_device(self):
-        return self.parallel_devices[self.local_rank]
 
     @property
     def lightning_module(self):
@@ -235,32 +214,3 @@ class DeepSpeedPlugin(ParallelPlugin):
                     "enabled": True,
                     "opt_level": amp_level,
                 }
-
-    def model_to_device(self):
-        if self.root_device.type == "cuda":
-            torch.cuda.set_device(self.root_device)
-        self.model.to(self.root_device)
-
-    def reduce(self, output, group: Optional[Any] = None, reduce_op: Optional[Union[ReduceOp, str]] = None):
-        if isinstance(output, torch.Tensor):
-            output = sync_ddp_if_available(output, group, reduce_op)
-        return output
-
-    def barrier(self, *args, **kwargs):
-        if torch_distrib.is_initialized():
-            torch_distrib.barrier()
-
-    def broadcast(self, obj: object, src: int = 0) -> object:
-        return self.dist.broadcast(obj)
-
-    def training_step(self, *args, **kwargs):
-        return self.model(*args, **kwargs)
-
-    def validation_step(self, *args, **kwargs):
-        return self.model(*args, **kwargs)
-
-    def test_step(self, *args, **kwargs):
-        return self.model(*args, **kwargs)
-
-    def predict(self, *args, **kwargs):
-        return self.model(*args, **kwargs)

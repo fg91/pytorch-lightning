@@ -36,6 +36,30 @@ def test_deepspeed_choice(tmpdir):
 
 
 @pytest.mark.skipif(not _DEEPSPEED_AVAILABLE, reason="DeepSpeed not available.")
+def test_deepspeed_plugin(tmpdir):
+    """
+        Test to ensure that the plugin can be passed directly, and parallel devices is correctly set.
+    """
+
+    class CB(Callback):
+
+        def on_fit_start(self, trainer, pl_module):
+            assert isinstance(trainer.accelerator_backend.training_type_plugin, DeepSpeedPlugin)
+            assert trainer.accelerator_backend.training_type_plugin.parallel_devices == [torch.device('cpu')]
+            raise SystemExit()
+
+    model = BoringModel()
+    trainer = Trainer(
+        fast_dev_run=True,
+        plugins=[DeepSpeedPlugin(config={})],
+        callbacks=[CB()],
+    )
+
+    with pytest.raises(SystemExit):
+        trainer.fit(model)
+
+
+@pytest.mark.skipif(not _DEEPSPEED_AVAILABLE, reason="DeepSpeed not available.")
 @pytest.mark.skipif(not _NATIVE_AMP_AVAILABLE, reason="Requires native AMP")
 def test_deepspeed_amp_choice(tmpdir):
     """
@@ -105,6 +129,9 @@ def test_invalid_deepspeed_without_config(tmpdir):
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires GPU machine")
 @pytest.mark.skipif(platform.system() == "Windows", reason="Distributed training is not supported on Windows")
 @pytest.mark.skipif(not _DEEPSPEED_AVAILABLE, reason="DeepSpeed not available.")
+@pytest.mark.skipif(
+    not os.getenv("PL_RUNNING_SPECIAL_TESTS", '0') == '1', reason="test should be run outside of pytest"
+)
 def test_deepspeed(tmpdir):
     """
         Test to ensure deepspeed works correctly with a valid config object,
@@ -147,65 +174,11 @@ def test_deepspeed(tmpdir):
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="requires GPU machine")
 @pytest.mark.skipif(platform.system() == "Windows", reason="Distributed training is not supported on Windows")
 @pytest.mark.skipif(not _DEEPSPEED_AVAILABLE, reason="DeepSpeed not available.")
-def test_deepspeed_offload_zero(tmpdir):
-    """
-        Test to ensure that zero offload works correctly as expected with lightning.
-    """
-    deepspeed_config = {
-        "optimizer": {
-            "type": "Adam",
-            "params": {
-                "lr": 3e-5,
-                "betas": [0.998, 0.999],
-                "eps": 1e-5,
-                "weight_decay": 1e-9,
-            },
-        },
-        'scheduler': {
-            "type": "WarmupLR",
-            "params": {
-                "last_batch_iteration": -1,
-                "warmup_min_lr": 0,
-                "warmup_max_lr": 3e-5,
-                "warmup_num_steps": 100,
-            }
-        },
-        "zero_allow_untested_optimizer": False,
-        "zero_optimization": {
-            "stage": 2,
-            "cpu_offload": True,
-            "contiguous_gradients": True,
-            "overlap_comm": True
-        }
-    }
-    model = BoringModel()
-    trainer = Trainer(
-        accelerator='deepspeed',
-        gpus=1,
-        fast_dev_run=True,
-        deepspeed_config=deepspeed_config,
-        precision=16,
-    )
-
-    trainer.fit(model)
-
-    checkpoint_path = os.path.join(tmpdir, 'model.pt')
-    trainer.save_checkpoint(checkpoint_path)
-    saved_model = BoringModel.load_from_checkpoint(checkpoint_path)
-
-    # Assert model parameters are identical after loading
-    for orig_param, trained_model_param in zip(model.parameters(), saved_model.parameters()):
-        assert torch.equal(orig_param, trained_model_param)
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires GPU machine")
-@pytest.mark.skipif(platform.system() == "Windows", reason="Distributed training is not supported on Windows")
-@pytest.mark.skipif(not _DEEPSPEED_AVAILABLE, reason="DeepSpeed not available.")
 @pytest.mark.skipif(torch.cuda.device_count() < 2, reason="test requires multi-GPU machine")
 @pytest.mark.skipif(
     not os.getenv("PL_RUNNING_SPECIAL_TESTS", '0') == '1', reason="test should be run outside of pytest"
 )
-def test_deepspeed_multigpu(tmpdir):
+def test_deepspeed_offload_zero_multigpu(tmpdir):
     """
         Test to ensure that zero offload with multiple GPUs works correctly.
     """
@@ -249,8 +222,11 @@ def test_deepspeed_multigpu(tmpdir):
 
     checkpoint_path = os.path.join(tmpdir, 'model.pt')
     trainer.save_checkpoint(checkpoint_path)
-    saved_model = BoringModel.load_from_checkpoint(checkpoint_path)
-
-    # Assert model parameters are identical after loading
-    for orig_param, trained_model_param in zip(model.parameters(), saved_model.parameters()):
-        assert torch.equal(orig_param, trained_model_param)
+    # carry out the check only on rank 0
+    if trainer.global_rank == 0:
+        saved_model = BoringModel.load_from_checkpoint(checkpoint_path)
+        saved_model = saved_model.float()
+        model = model.float()
+        # Assert model parameters are identical after loading
+        for orig_param, trained_model_param in zip(model.parameters(), saved_model.parameters()):
+            assert torch.equal(orig_param, trained_model_param)

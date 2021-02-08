@@ -388,7 +388,12 @@ class BackendConnector(object):
         elif self.use_dp:
             plugin = DataParallelPlugin(parallel_devices=self.parallel_devices)
         elif self.use_deepspeed:
-            plugin = DeepSpeedPlugin(config=self.deepspeed_config, parallel_devices=self.parallel_devices)
+            plugin = DeepSpeedPlugin(
+                config=self.deepspeed_config,
+                num_nodes=self.num_nodes,
+                cluster_environment=self.select_cluster_environment(),
+                parallel_devices=self.parallel_devices
+            )
         elif self.use_horovod:
             plugin = HorovodPlugin(parallel_devices=self.parallel_devices)
         elif self.on_tpu:
