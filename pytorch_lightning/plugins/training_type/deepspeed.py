@@ -20,7 +20,6 @@ from types import SimpleNamespace
 from typing import Callable, List, Tuple, Union
 
 import torch
-import torch.distributed as torch_distrib
 
 from pytorch_lightning.core.lightning import LightningModule
 from pytorch_lightning.overrides.base import _LightningModuleWrapperBase
