@@ -63,4 +63,5 @@ _FAIRSCALE_LOWER_EQUAL_0_1_3 = (_FAIRSCALE_AVAILABLE and _get_version('fairscale
 _FAIRSCALE_PIPE_AVAILABLE = (_TORCH_GREATER_EQUAL_1_6 and _FAIRSCALE_LOWER_EQUAL_0_1_3)
 _BOLTS_AVAILABLE = _module_available('pl_bolts')
 _TORCH_PRUNE_AVAILABLE = _module_available('torch.nn.utils.prune')
+_TORCH_QUANTIZE_AVAILABLE = _module_available('torch.ops.quantized')
 _TORCHVISION_AVAILABLE = _module_available('torchvision')
