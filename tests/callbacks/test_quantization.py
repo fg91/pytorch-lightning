@@ -60,7 +60,7 @@ def test_quantization(tmpdir, observe, fuse):
     size_ratio = quant_size / org_size
     assert size_ratio < 0.65
     # test that the test score is almost the same as with pure training
-    assert torch.allclose(org_score, quant_score, atol=0.35)
+    assert torch.allclose(org_score, quant_score, atol=0.45)
 
 
 def test_quantize_torchscript(tmpdir):
